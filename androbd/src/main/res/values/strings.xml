@@ -66,6 +66,8 @@ period of time while the ECU recalibrates itself.
     <string name="snapshot">snapshot</string>
     <string name="save">Save measurement</string>
     <string name="load">Load measurement</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume</string>
     <string name="saved_data">Saved Data</string>
     <string name="loaded">loaded</string>
     <string name="saved">saved</string>

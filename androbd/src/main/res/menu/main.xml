@@ -21,6 +21,16 @@
         android:icon="@android:drawable/ic_menu_save"
         android:title="@string/save"/>
     <item
+            android:id="@+id/pause"
+            android:icon="@android:drawable/ic_media_pause"
+            android:title="@string/pause"
+            android:visible="true"/>
+    <item
+            android:id="@+id/resume"
+            android:icon="@android:drawable/ic_media_play"
+            android:title="@string/resume"
+            android:visible="false"/>
+    <item
         android:id="@+id/load"
         android:icon="@drawable/ic_action_load"
         android:title="@string/load"/>

@@ -21,6 +21,7 @@ package com.fr3ts0n.ecu.gui.androbd;
 import android.annotation.SuppressLint;
 import android.app.ProgressDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.net.Uri;
 import android.os.Environment;
 import android.os.Handler;
@@ -53,10 +54,9 @@ class FileHelper
 	private static ProgressDialog progress;
 
 	private static final Logger log = Logger.getLogger(FileHelper.class.getName());
-	
+
 	private final Context context;
 	private final ElmProt elm;
-
 	/**
 	 * Initialize static data for static calls
 	 *  @param context APP context
@@ -96,32 +96,71 @@ class FileHelper
 	/**
 	 * Save all data in a independent thread
 	 */
-	void saveDataThreaded()
-	{
-		// generate file name
+	// Control flag for pause/resume
+	private boolean isPaused = false;
+	// Handler for scheduling the save task at regular intervals
+	private Handler handler = new Handler();
+	private static boolean isSaving = false; // A flag to track if data is being saved
+	// A flag to track if the saving process is paused
+
+	// This method will be triggered by the "Pause" button
+	public void pauseSaving() {
+		isPaused = true; // Set the flag to true
+	}
+
+	// This method will be triggered by the "Resume" button
+	public void resumeSaving() {
+		isPaused = false; // Set the flag to false
+		saveDataThreaded(); // Resume saving data
+	}
+	/**
+	 * Continuously save data every second in a separate thread until paused.
+	 */
+	void saveDataThreaded() {
+		// Generate file path and name
+		if (isSaving) return; // If already saving, do nothing
+		isSaving = true; // Set the saving flag to true
+
 		final String mPath = getPath(context);
-		final String mFileName = mPath
-			+ File.separator
-			+ getFileName()
-			+ ".obd";
+		final String mFileName = mPath + File.separator + getFileName() + ".obd";
 
-		// create progress dialog
-		progress = ProgressDialog.show(context,
-			context.getString(R.string.saving_data),
-			mFileName,
-			true);
+		// Initialize the progress dialog with a Stop button
+		progress = new ProgressDialog(context);
+		progress.setMessage(context.getString(R.string.saving_data) + ": " + mFileName);
+		progress.setCancelable(false); // Disable outside touches to dismiss the dialog
+		progress.setButton(DialogInterface.BUTTON_NEGATIVE, "Stop", (dialog, which) -> stopSaving());
 
-		Thread saveTask = new Thread()
-		{
-			public void run()
-			{
-				Looper.prepare();
-				saveData(mPath, mFileName);
-				progress.dismiss();
-				Looper.loop();
+		// Show the progress dialog
+		progress.show();
+
+		// Define the repeating save task
+		Runnable saveTask = new Runnable() {
+			@Override
+			public void run() {
+				if (!isPaused && isSaving) {
+					// Save data to file
+					saveData(mPath, mFileName);
+					// Schedule the next save in 1 second
+					handler.postDelayed(this, 1000);
+				} else {
+					// If paused or stopped, dismiss the progress dialog
+					progress.dismiss();
+				}
 			}
 		};
-		saveTask.start();
+		// Start the saving task
+		handler.post(saveTask);
+	}
+
+	/**
+	 * Method to stop the saving process.
+	 */
+	public void stopSaving() {
+		isSaving = false; // Stop the saving process
+		handler.removeCallbacksAndMessages(null); // Remove all scheduled tasks
+		if (progress != null && progress.isShowing()) {
+			progress.dismiss(); // Dismiss the progress dialog
+		}
 	}
 
 	/**

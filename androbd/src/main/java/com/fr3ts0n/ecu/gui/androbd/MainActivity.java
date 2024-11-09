@@ -285,6 +285,8 @@ public class MainActivity extends PluginManager
     /**
      * Handle message requests
      */
+
+
     @SuppressLint("HandlerLeak")
     private transient final Handler mHandler = new Handler()
     {
@@ -791,7 +793,10 @@ public class MainActivity extends PluginManager
         getMenuInflater().inflate(R.menu.obd_services, menu.findItem(R.id.obd_services).getSubMenu());
         MainActivity.menu = menu;
         // update menu item status for current conversion
+        menu.findItem(R.id.resume).setVisible(false);  // Hide Resume initially
+        menu.findItem(R.id.pause).setVisible(true);
         setConversionSystem(EcuDataItem.cnvSystem);
+
         return true;
     }
 
@@ -839,6 +844,20 @@ public class MainActivity extends PluginManager
             case R.id.save:
                 // save recorded data (threaded)
                 fileHelper.saveDataThreaded();
+                return true;
+            case R.id.pause:
+                // Call your pause functionality
+                fileHelper.pauseSaving();
+                // Hide Pause and show Resume
+                item.setVisible(false); // Hide "Pause" button
+                menu.findItem(R.id.resume).setVisible(true); // Show "Resume" button
+                return true;
+            case R.id.resume:
+                // Call your resume functionality
+                fileHelper.resumeSaving();
+                // Hide Resume and show Pause
+                item.setVisible(false); // Hide "Resume" button
+                menu.findItem(R.id.pause).setVisible(true); // Show "Pause" button
                 return true;
 
             case R.id.load:
