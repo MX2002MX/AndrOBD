@@ -193,7 +193,7 @@ public class ElmProt
 			return elmState;
 		}
 	}
-	
+
 	/**
 	 * numeric IDs for commands
 	 */
@@ -218,31 +218,30 @@ public class ElmProt
 		SETTXHDR("SH", 3, true), ///< set TX header
 		SETCANRXFLT("CRA", 3, true), ///< set CAN RX filter
 		CLRCANRXFLT("CRA", 0, true); ///< clear CAN RX filter
-		
+
 		static final String CMD_HEADER = "AT";
-		private final String command;
-		final int paramDigits;
+		public final String command;
+		public final int paramDigits;
 		private final boolean disablingAllowed;
 		private boolean enabled = true;
-		
+
 		CMD(String cmd, int numDigitsParameter, @SuppressWarnings("SameParameterValue") boolean allowAdaption)
 		{
 			command = cmd;
 			paramDigits = numDigitsParameter;
 			disablingAllowed = allowAdaption;
 		}
-		
 		@Override
 		public String toString()
 		{
 			return CMD_HEADER + command;
 		}
-		
+
 		public boolean isEnabled()
 		{
 			return enabled;
 		}
-		
+
 		void setEnabled(boolean enabled)
 		{
 			if (disablingAllowed)
@@ -254,7 +253,10 @@ public class ElmProt
 				toString(),
 				this.enabled ? "enabled" : "disabled"));
 		}
-		
+
+		public int getParamDigits() {
+			return paramDigits;
+		}
 		public boolean isDisablingAllowed()
 		{
 			return disablingAllowed;

@@ -32,11 +32,7 @@ import com.fr3ts0n.ecu.prot.obd.ElmProt;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.PvList;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
+import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -46,7 +42,7 @@ import java.util.logging.Logger;
  *
  * @author Erwin Scheuch-Heilig
  */
-class FileHelper
+public class FileHelper
 {
 	/** Date Formatter used to generate file name */
 	@SuppressLint("SimpleDateFormat")
@@ -117,40 +113,33 @@ class FileHelper
 	 * Continuously save data every second in a separate thread until paused.
 	 */
 	void saveDataThreaded() {
-		// Generate file path and name
-		if (isSaving) return; // If already saving, do nothing
-		isSaving = true; // Set the saving flag to true
+		if (isSaving) return;
+		isSaving = true;
 
 		final String mPath = getPath(context);
-		final String mFileName = mPath + File.separator + getFileName() + ".obd";
+		final String mFileName = mPath + File.separator + getFileName() + ".csv";
 
-		// Initialize the progress dialog with a Stop button
 		progress = new ProgressDialog(context);
 		progress.setMessage(context.getString(R.string.saving_data) + ": " + mFileName);
-		progress.setCancelable(false); // Disable outside touches to dismiss the dialog
+		progress.setCancelable(false);
 		progress.setButton(DialogInterface.BUTTON_NEGATIVE, "Stop", (dialog, which) -> stopSaving());
 
-		// Show the progress dialog
 		progress.show();
 
-		// Define the repeating save task
 		Runnable saveTask = new Runnable() {
 			@Override
 			public void run() {
 				if (!isPaused && isSaving) {
-					// Save data to file
 					saveData(mPath, mFileName);
-					// Schedule the next save in 1 second
-					handler.postDelayed(this, 1000);
+					handler.postDelayed(this, 1000); // Schedule next save in 1 second
 				} else {
-					// If paused or stopped, dismiss the progress dialog
 					progress.dismiss();
 				}
 			}
 		};
-		// Start the saving task
 		handler.post(saveTask);
 	}
+
 
 	/**
 	 * Method to stop the saving process.
@@ -162,53 +151,163 @@ class FileHelper
 			progress.dismiss(); // Dismiss the progress dialog
 		}
 	}
+	public void fetchDataForPIDs() {
+		// Define PIDs for different parameters (Speed, RPM, etc.)
+		String[] pids = {"010D", "010C", "0111", "0104", "010F", "0110", "0902"};
 
-	/**
-	 * Save all data
-	 */
-	@SuppressWarnings("ResultOfMethodCallIgnored")
-	private synchronized void saveData(String mPath, String mFileName)
-	{
+		// Send commands for each PID
+		for (String pid : pids) {
+			sendPidRequest(pid);
+		}
+	}
+
+	private void sendPidRequest(String pid) {
+		try {
+			ElmProt.CMD cmdEnum = ElmProt.CMD.valueOf(pid); // Convert the PID string to CMD enum constant
+			String cmd = createCommand(cmdEnum, 0); // Use createCommand to build the full command
+			sendCommandForPid(cmd); // Send the constructed command
+		} catch (IllegalArgumentException e) {
+			log.severe("Invalid PID: " + pid);  // Handle invalid PID if not found in the enum
+			Toast.makeText(context, "Invalid PID: " + pid, Toast.LENGTH_SHORT).show();
+		}
+	}
+	// Sends the command to the ELM327 (adapt as needed based on your setup)
+	public String sendCommandForPid(String cmd) {
+		// This method assumes that you can send raw commands
+		elm.sendCommand(ElmProt.CMD.valueOf(cmd), 0);  // CMD.valueOf is an example; replace with how you send commands
+		return cmd;
+	}
+
+// Assuming you have CMD enum like this
+// public enum CMD { RESET("Z", 0, true), ... };
+
+	private String createCommand(ElmProt.CMD cmdID, int param) {
+		String cmd = null;
+
+		if (cmdID.isEnabled()) {
+			// Get the command from the enum constant directly
+			cmd = "01" + cmdID.command; // Use the command from the enum
+
+			// Check if parameter digits are required
+			if (cmdID.getParamDigits() > 0) {
+				// Format the parameter with leading zeros according to the specified digits
+				String fmtString = "%0" + cmdID.getParamDigits() + "X";
+				cmd += String.format(fmtString, param);
+			}
+		}
+
+		return cmd; // Return the final command string
+	}
+
+	/*private synchronized void saveData(String mPath, String mFileName) {
 		File outFile;
 
-		// ensure the path is created
-		//noinspection ResultOfMethodCallIgnored
 		new File(mPath).mkdirs();
 		outFile = new File(mFileName);
 
-		// prevent data updates for saving period
 		ObdItemAdapter.allowDataUpdates = false;
 
-		try
-		{
+		try {
 			outFile.createNewFile();
 			FileOutputStream fStr = new FileOutputStream(outFile);
 			ObjectOutputStream oStr = new ObjectOutputStream(fStr);
-			oStr.writeInt(elm.getService());
-			oStr.writeObject(ObdProt.PidPvs);
-			oStr.writeObject(ObdProt.VidPvs);
-			oStr.writeObject(ObdProt.tCodes);
-			oStr.writeObject(MainActivity.mPluginPvs);
+
+			// Simulated data instead of actual OBD-II data
+			String speed = "Speed response: 50"; // Simulated speed value
+			String rpm = "RPM response: 2000"; // Simulated RPM value
+			String throttlePosition = "Throttle response: 30"; // Simulated throttle position value
+			String engineLoad = "Engine load: 80"; // Simulated engine load
+			String intakeTemperature = "Intake temperature: 35"; // Simulated intake temperature
+			String maf = "MAF response: 120"; // Simulated MAF value
+			String vin = "VIN: 1HGCM82633A123456"; // Simulated VIN
+
+			// Save the data to the file
+			oStr.writeObject(speed);
+			oStr.writeObject(rpm);
+			oStr.writeObject(throttlePosition);
+			oStr.writeObject(engineLoad);
+			oStr.writeObject(intakeTemperature);
+			oStr.writeObject(maf);
+			oStr.writeObject(vin);
 
 			oStr.close();
 			fStr.close();
 
-			@SuppressLint("DefaultLocale")
-			String msg = String.format("%s %d Bytes to %s",
-				context.getString(R.string.saved),
-				outFile.length(),
-				mPath);
+			// Log success message
+			String msg = String.format("%s %d Bytes to %s", context.getString(R.string.saved), outFile.length(), mPath);
 			log.info(msg);
 			Toast.makeText(context, msg, Toast.LENGTH_SHORT).show();
-		} catch (Exception e)
-		{
+		} catch (Exception e) {
 			Toast.makeText(context, e.toString(), Toast.LENGTH_SHORT).show();
 			e.printStackTrace();
 		}
 
-		// we are done saving, allow data updates again
+		ObdItemAdapter.allowDataUpdates = true;
+	} */
+
+
+	private synchronized void saveData(String mPath, String mFileName) {
+		File outFile;
+
+		new File(mPath).mkdirs();
+		outFile = new File(mFileName);
+
+		ObdItemAdapter.allowDataUpdates = false;
+
+		try {
+			outFile.createNewFile();
+			FileOutputStream fStr = new FileOutputStream(outFile);
+			ObjectOutputStream oStr = new ObjectOutputStream(fStr);
+
+			// Fetch and save data for each parameter
+			String speed = getData("010D"); // Speed
+			String rpm = getData("010C"); // RPM
+			String throttlePosition = getData("0111"); // Throttle Position
+			String engineLoad = getData("0104"); // Engine Load
+			String intakeTemperature = getData("010F"); // Intake Temp
+			String maf = getData("0110"); // MAF
+			String vin = getData("0902"); // VIN
+
+			// Save the data to the file
+			oStr.writeObject(speed);
+			oStr.writeObject(rpm);
+			oStr.writeObject(throttlePosition);
+			oStr.writeObject(engineLoad);
+			oStr.writeObject(intakeTemperature);
+			oStr.writeObject(maf);
+			oStr.writeObject(vin);
+
+			oStr.close();
+			fStr.close();
+
+			// Log success message
+			String msg = String.format("%s %d Bytes to %s", context.getString(R.string.saved), outFile.length(), mPath);
+			log.info(msg);
+			Toast.makeText(context, msg, Toast.LENGTH_SHORT).show();
+		} catch (Exception e) {
+			Toast.makeText(context, e.toString(), Toast.LENGTH_SHORT).show();
+			e.printStackTrace();
+		}
+
 		ObdItemAdapter.allowDataUpdates = true;
 	}
+
+
+	// Helper method to fetch data for a given PID
+	private String getData(String pid) {
+		// Send the command for the PID and return the response
+		sendPidRequest(pid);
+
+		// You will need to implement response processing here
+		return processResponse(pid);  // processResponse needs to handle the response parsing
+	}
+
+	private String processResponse(String pid) {
+		// Parse the response and return the data as needed
+		return "parsed_data";  // Placeholder for actual response handling
+	}
+
+
 
 	/**
 	 * Load all data in a independent thread
