@@ -26,16 +26,24 @@ import android.net.Uri;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.widget.Toast;
 
+import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.prot.obd.ElmProt;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvList;
 
 import java.io.*;
 import java.text.SimpleDateFormat;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import com.fr3ts0n.pvs.PvList;
 
 /**
  * Task to save measurements
@@ -53,12 +61,13 @@ public class FileHelper
 
 	private final Context context;
 	private final ElmProt elm;
+	public transient PvList pvs;
 	/**
 	 * Initialize static data for static calls
 	 *  @param context APP context
 	 *
 	 */
-	FileHelper(Context context)
+    public FileHelper(Context context)
 	{
 		this.context = context;
 		this.elm = CommService.elm;
@@ -70,12 +79,14 @@ public class FileHelper
 	 *
 	 * @return default path for current app context
 	 */
-	static String getPath(Context context)
-	{
-		// generate file name
-		return Environment.getExternalStorageDirectory()
-			+ File.separator
-			+ context.getPackageName();
+	static String getPath(Context context) {
+		// Use the app's external files directory, which is automatically in /storage/emulated/0/Android/data/
+		File dir = context.getExternalFilesDir(null);
+		return (dir != null) ? dir.getAbsolutePath() : context.getFilesDir().getAbsolutePath();
+	}
+
+	public void setPvs(PvList pvs) {
+		this.pvs = pvs;
 	}
 
 	/**
@@ -116,8 +127,8 @@ public class FileHelper
 		if (isSaving) return;
 		isSaving = true;
 
-		final String mPath = getPath(context);
-		final String mFileName = mPath + File.separator + getFileName() + ".csv";
+		final String mPath = getPath(context);  // Now this gives the correct app-specific directory
+		final String mFileName = getFileName() + ".csv"; // Just use the filename without the full path here
 
 		progress = new ProgressDialog(context);
 		progress.setMessage(context.getString(R.string.saving_data) + ": " + mFileName);
@@ -130,7 +141,7 @@ public class FileHelper
 			@Override
 			public void run() {
 				if (!isPaused && isSaving) {
-					saveData(mPath, mFileName);
+					saveData(mFileName); // Pass only the path and filename separately
 					handler.postDelayed(this, 1000); // Schedule next save in 1 second
 				} else {
 					progress.dismiss();
@@ -151,15 +162,7 @@ public class FileHelper
 			progress.dismiss(); // Dismiss the progress dialog
 		}
 	}
-	public void fetchDataForPIDs() {
-		// Define PIDs for different parameters (Speed, RPM, etc.)
-		String[] pids = {"010D", "010C", "0111", "0104", "010F", "0110", "0902"};
 
-		// Send commands for each PID
-		for (String pid : pids) {
-			sendPidRequest(pid);
-		}
-	}
 
 	private void sendPidRequest(String pid) {
 		try {
@@ -199,98 +202,70 @@ public class FileHelper
 		return cmd; // Return the final command string
 	}
 
-	/*private synchronized void saveData(String mPath, String mFileName) {
-		File outFile;
+	public void saveData(String fileName) {
+		// Get the app's internal storage "Documents" directory
+		File documentsDir = new File(Environment.getExternalStorageDirectory(), "Documents");
 
-		new File(mPath).mkdirs();
-		outFile = new File(mFileName);
-
-		ObdItemAdapter.allowDataUpdates = false;
-
-		try {
-			outFile.createNewFile();
-			FileOutputStream fStr = new FileOutputStream(outFile);
-			ObjectOutputStream oStr = new ObjectOutputStream(fStr);
-
-			// Simulated data instead of actual OBD-II data
-			String speed = "Speed response: 50"; // Simulated speed value
-			String rpm = "RPM response: 2000"; // Simulated RPM value
-			String throttlePosition = "Throttle response: 30"; // Simulated throttle position value
-			String engineLoad = "Engine load: 80"; // Simulated engine load
-			String intakeTemperature = "Intake temperature: 35"; // Simulated intake temperature
-			String maf = "MAF response: 120"; // Simulated MAF value
-			String vin = "VIN: 1HGCM82633A123456"; // Simulated VIN
-
-			// Save the data to the file
-			oStr.writeObject(speed);
-			oStr.writeObject(rpm);
-			oStr.writeObject(throttlePosition);
-			oStr.writeObject(engineLoad);
-			oStr.writeObject(intakeTemperature);
-			oStr.writeObject(maf);
-			oStr.writeObject(vin);
-
-			oStr.close();
-			fStr.close();
-
-			// Log success message
-			String msg = String.format("%s %d Bytes to %s", context.getString(R.string.saved), outFile.length(), mPath);
-			log.info(msg);
-			Toast.makeText(context, msg, Toast.LENGTH_SHORT).show();
-		} catch (Exception e) {
-			Toast.makeText(context, e.toString(), Toast.LENGTH_SHORT).show();
-			e.printStackTrace();
+		// Create the directory if it does not exist
+		if (!documentsDir.exists()) {
+			documentsDir.mkdirs();  // Make sure the "Documents" folder exists
 		}
 
-		ObdItemAdapter.allowDataUpdates = true;
-	} */
+		// Create the full file path in the Documents directory
+		String fullPath = documentsDir.getAbsolutePath() + File.separator + fileName;
 
 
-	private synchronized void saveData(String mPath, String mFileName) {
-		File outFile;
+		// Open CSV file for writing (append mode)
+		try (FileWriter writer = new FileWriter(fullPath, true)) {
+			// Check if the file is empty to write a header row
+			File file = new File(fullPath);
+			if (file.length() == 0) {
+				writer.write("Description,Value,Units,PID\n"); // Header for CSV
+			}
 
-		new File(mPath).mkdirs();
-		outFile = new File(mFileName);
+			// Loop through all process variables in `pvs`
+			if (pvs == null) {
+				Log.e("SaveData", "pvs is null. No data to save.");
+				return;
+			}
 
-		ObdItemAdapter.allowDataUpdates = false;
+			for (Object obj : pvs.values()) {
+				// Ensure the object is of the correct type
+				if (obj instanceof IndexedProcessVar) {
+					IndexedProcessVar pv = (IndexedProcessVar) obj;
 
-		try {
-			outFile.createNewFile();
-			FileOutputStream fStr = new FileOutputStream(outFile);
-			ObjectOutputStream oStr = new ObjectOutputStream(fStr);
+					// Retrieve fields for each data item
+					String description = String.valueOf(pv.get(EcuDataPv.FID_DESCRIPT));
+					String value = String.valueOf(pv.get(EcuDataPv.FID_VALUE));
+					String units = String.valueOf(pv.get(EcuDataPv.FID_UNITS));
+					String pid = String.valueOf(pv.get(EcuDataPv.FID_PID));
 
-			// Fetch and save data for each parameter
-			String speed = getData("010D"); // Speed
-			String rpm = getData("010C"); // RPM
-			String throttlePosition = getData("0111"); // Throttle Position
-			String engineLoad = getData("0104"); // Engine Load
-			String intakeTemperature = getData("010F"); // Intake Temp
-			String maf = getData("0110"); // MAF
-			String vin = getData("0902"); // VIN
+					// Construct CSV row and write it to the file
+					String csvRow = String.format("%s,%s,%s,%s\n", description, value, units, pid);
+					writer.write(csvRow);
+				} else {
+					Log.e("SaveData", "Unexpected object in pvs: " + obj);
+				}
+			}
 
-			// Save the data to the file
-			oStr.writeObject(speed);
-			oStr.writeObject(rpm);
-			oStr.writeObject(throttlePosition);
-			oStr.writeObject(engineLoad);
-			oStr.writeObject(intakeTemperature);
-			oStr.writeObject(maf);
-			oStr.writeObject(vin);
+			// Flush and close the writer
+			writer.flush();
+			Log.d("SaveData", "Data saved successfully at: " + fullPath);
+			Toast.makeText(context, "Data saved at: " + fullPath, Toast.LENGTH_SHORT).show();
 
-			oStr.close();
-			fStr.close();
-
-			// Log success message
-			String msg = String.format("%s %d Bytes to %s", context.getString(R.string.saved), outFile.length(), mPath);
-			log.info(msg);
-			Toast.makeText(context, msg, Toast.LENGTH_SHORT).show();
+		} catch (IOException e) {
+			Log.e("SaveData", "Error saving data", e);
+			Toast.makeText(context, "File write error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
 		} catch (Exception e) {
-			Toast.makeText(context, e.toString(), Toast.LENGTH_SHORT).show();
-			e.printStackTrace();
+			// Catch any unexpected exceptions
+			Log.e("SaveData", "Unexpected error", e);
+			Toast.makeText(context, "Unexpected error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
 		}
-
-		ObdItemAdapter.allowDataUpdates = true;
 	}
+
+
+
+
 
 
 	// Helper method to fetch data for a given PID

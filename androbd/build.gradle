@@ -2,10 +2,10 @@ apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
 android {
-    compileSdk 34
+    compileSdk 35
     defaultConfig {
         applicationId 'com.fr3ts0n.ecu.gui.androbd'
-        minSdkVersion 17
+        minSdkVersion 21
         // SDK 25 to allow background service mechanism for plugins
         //noinspection ExpiredTargetSdkVersion
         targetSdkVersion 25
@@ -45,5 +45,15 @@ dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation 'com.github.mik3y:usb-serial-for-android:3.8.0'
     implementation 'com.github.anastr:speedviewlib:1.6.1'
-    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.core:core-ktx:1.15.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-core:4.0.0'
+    implementation 'androidx.core:core:1.15.0'  // Use a version compatible with minSdk 17
+    // Mockito for static methods
+    testImplementation 'org.mockito:mockito-core:4.0.0'
+    testImplementation 'org.mockito:mockito-inline:4.0.0'
+    // For JUnit 5
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.2'
+    testImplementation 'org.junit.jupiter:junit-jupiter-engine:5.10.2'
+    testImplementation 'org.robolectric:robolectric:4.10.3'
 }

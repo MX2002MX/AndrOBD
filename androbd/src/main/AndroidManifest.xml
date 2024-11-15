@@ -3,11 +3,15 @@
     <!-- start/stop bluetooth adapter -->
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" /> <!-- connect/disconnect bluetooth devices -->
     <uses-permission android:name="android.permission.BLUETOOTH" /> <!-- to keep Bluetooth measurement running even when screen is inactive -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.WAKE_LOCK" /> <!-- allow saving screenshots -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" /> <!-- allow saving screenshots -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" /> <!-- allow access to WIFI adapter -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
+
+
+
 
     <application
         android:allowBackup="true"
