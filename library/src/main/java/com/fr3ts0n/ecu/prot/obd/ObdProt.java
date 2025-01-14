@@ -176,7 +176,7 @@ public class ObdProt extends ProtoHeader
     /** content of last sent message */
     static String lastTxMsg = "";
     /** content of last received message */
-    static String lastRxMsg = "";
+    public static String lastRxMsg = "";
     /** Holds value of property service. */
     int service = OBD_SVC_NONE;
     /** service of last incoming message */

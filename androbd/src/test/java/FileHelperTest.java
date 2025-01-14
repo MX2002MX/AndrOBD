@@ -18,6 +18,8 @@ import java.io.*;
 import java.util.Collections;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.*;
 
 @RunWith(RobolectricTestRunner.class)
@@ -62,6 +64,95 @@ public class FileHelperTest {
     }
 
     @Test
+    public void testSaveDataAddsHeaderIfEmpty() throws IOException {
+        File tempFile = File.createTempFile("test_obd_data_empty", ".csv");
+        try {
+            // Ensure the file is empty
+            assertTrue(tempFile.length() == 0);
+
+            // Set valid `pvs` with mock data
+            PvList mockPvList = new PvList();
+            fileHelper.setPvs(mockPvList);
+
+            // Call saveData
+            fileHelper.saveData(tempFile.getName());
+
+            // Read the file and verify the header and content
+            try (BufferedReader reader = new BufferedReader(new FileReader(tempFile))) {
+                String line1 = reader.readLine(); // Header
+                System.out.println("First Line in File: " + line1); // Print the first line
+                assertEquals("Description,Value,Units,PID", line1); // Validate header
+            }
+        } finally {
+            tempFile.delete(); // Cleanup
+        }
+    }
+
+
+    @Test
+    public void testSaveDataWithDirectoryCreationFailure() {
+        // Mock directory creation failure
+        when(mockDocumentsDir.mkdirs()).thenReturn(false);
+
+        try (MockedStatic<Toast> mockedToast = mockStatic(Toast.class)) {
+            mockedToast.when(() -> Toast.makeText(any(Context.class), anyString(), eq(Toast.LENGTH_SHORT)))
+                    .thenReturn(mockToast);
+
+            fileHelper.saveData("test_dir_fail.csv");
+
+            // Print message to check Toast content
+            System.out.println("Toast Message: " + "Directory creation failed!");
+
+            // Verify no file is created and Toast shows appropriate message
+            verify(mockToast, times(1)).show();
+            assertFalse(new File("mock/directory/path/test_dir_fail.csv").exists());
+        }
+    }
+
+
+    @Test
+    public void testSaveDataWithUnexpectedObjectInPvs() {
+        PvList mockPvListWithInvalidData = mock(PvList.class);
+        when(mockPvListWithInvalidData.values()).thenReturn(Collections.singletonList("InvalidObject"));
+        fileHelper.setPvs(mockPvListWithInvalidData);
+
+        try (MockedStatic<Toast> mockedToast = mockStatic(Toast.class)) {
+            mockedToast.when(() -> Toast.makeText(any(Context.class), anyString(), eq(Toast.LENGTH_SHORT)))
+                    .thenReturn(mockToast);
+
+            // Print the contents of the PvList for debugging
+            System.out.println("PvList Contents: " + mockPvListWithInvalidData.values());
+
+            fileHelper.saveData("test_invalid_object.csv");
+
+            // Verify that no file is created, and error is logged
+            verify(mockToast, times(1)).show();
+            assertFalse(new File("mock/directory/path/test_invalid_object.csv").exists());
+        }
+    }
+
+
+    @Test
+    public void testSaveDataWithNullPvs() {
+        fileHelper.setPvs(null); // Set `pvs` to null
+
+        try (MockedStatic<Toast> mockedToast = mockStatic(Toast.class)) {
+            mockedToast.when(() -> Toast.makeText(any(Context.class), anyString(), eq(Toast.LENGTH_SHORT)))
+                    .thenReturn(mockToast);
+
+            // Log the pvs state
+            System.out.println("pvs is null: " + (fileHelper.getPvs() == null));
+
+            fileHelper.saveData("test_null_pvs.csv");
+
+            // Verify no file is created and Toast shows appropriate message
+            verify(mockToast, times(1)).show();
+            assertFalse(new File("mock/directory/path/test_null_pvs.csv").exists());
+        }
+    }
+
+
+    @Test
     public void testSaveDataWithRealValues() throws Exception {
         // Mock the external files directory and toast message
         when(mockDocumentsDir.exists()).thenReturn(true);
@@ -77,6 +168,9 @@ public class FileHelperTest {
             // Verify that Toast was shown (indicating success)
             verify(mockToast, times(1)).show();
         }
+
+        // Verify that the directory path was used correctly
+        verify(context, times(1)).getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
 
         // Verify the data was saved correctly (check the actual content written to the file)
         File savedFile = new File(mockDocumentsDir, "test_obd_data.csv");
@@ -95,11 +189,11 @@ public class FileHelperTest {
         }
     }
 
+
     @Test
     public void testWriteDataToFile() throws IOException {
         // Create a temporary file for testing
         File tempFile = File.createTempFile("test_obd_data", ".csv");
-
         try {
             fileHelper.saveData(tempFile.getName());
             assertTrue(tempFile.exists());

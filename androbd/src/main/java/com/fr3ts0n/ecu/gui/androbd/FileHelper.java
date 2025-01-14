@@ -18,6 +18,9 @@
 
 package com.fr3ts0n.ecu.gui.androbd;
 
+import static com.fr3ts0n.ecu.gui.androbd.CommService.log;
+import static com.fr3ts0n.ecu.prot.obd.ObdProt.lastRxMsg;
+
 import android.annotation.SuppressLint;
 import android.app.ProgressDialog;
 import android.content.Context;
@@ -35,252 +38,358 @@ import com.fr3ts0n.ecu.prot.obd.ObdProt;
 import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvList;
 
-import java.io.*;
-import java.text.SimpleDateFormat;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import com.fr3ts0n.pvs.PvList;
+import java.io.InputStream;
+import java.io.ObjectInputStream;
+import java.text.SimpleDateFormat;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.logging.Level;
 
 /**
- * Task to save measurements
- *
- * @author Erwin Scheuch-Heilig
+ * Task to save measurements.
  */
-public class FileHelper
-{
+public class FileHelper {
+
 	/** Date Formatter used to generate file name */
 	@SuppressLint("SimpleDateFormat")
 	private static final SimpleDateFormat dateFmt = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss");
-	private static ProgressDialog progress;
-
-	private static final Logger log = Logger.getLogger(FileHelper.class.getName());
+	private static final String TAG = "FileHelper";
 
 	private final Context context;
 	private final ElmProt elm;
-	public transient PvList pvs;
-	/**
-	 * Initialize static data for static calls
-	 *  @param context APP context
-	 *
-	 */
-    public FileHelper(Context context)
-	{
+	private Map<String, IndexedProcessVar> pvs = new HashMap<>();
+
+	private boolean isSaving = false;
+	private boolean isPaused = false;
+	private final Handler handler = new Handler();
+	private ProgressDialog progress;
+
+	/** Date Formatter used to generate file name */
+	public FileHelper(Context context) {
 		this.context = context;
 		this.elm = CommService.elm;
-	}
-
-	/**
-	 * get default path for load/store operation
-	 * * path is based on configured <user data location>/<package name>
-	 *
-	 * @return default path for current app context
-	 */
-	static String getPath(Context context) {
-		// Use the app's external files directory, which is automatically in /storage/emulated/0/Android/data/
-		File dir = context.getExternalFilesDir(null);
-		return (dir != null) ? dir.getAbsolutePath() : context.getFilesDir().getAbsolutePath();
 	}
 
 	public void setPvs(PvList pvs) {
 		this.pvs = pvs;
 	}
 
-	/**
-	 * get filename (w/o extension) based on current date & time
-	 *
-	 * @return file name
-	 */
-	static String getFileName()
-	{
+	public static String getPath(Context context) {
+		File dir = context.getExternalFilesDir(null);
+		return (dir != null) ? dir.getAbsolutePath() : context.getFilesDir().getAbsolutePath();
+	}
+
+	public static String getFileName() {
 		return dateFmt.format(System.currentTimeMillis());
 	}
 
-
-	/**
-	 * Save all data in a independent thread
-	 */
-	// Control flag for pause/resume
-	private boolean isPaused = false;
-	// Handler for scheduling the save task at regular intervals
-	private Handler handler = new Handler();
-	private static boolean isSaving = false; // A flag to track if data is being saved
-	// A flag to track if the saving process is paused
-
-	// This method will be triggered by the "Pause" button
 	public void pauseSaving() {
-		isPaused = true; // Set the flag to true
+		isPaused = true;
 	}
 
-	// This method will be triggered by the "Resume" button
 	public void resumeSaving() {
-		isPaused = false; // Set the flag to false
-		saveDataThreaded(); // Resume saving data
+		if (isPaused) {
+			isPaused = false;
+			saveDataThreaded();
+		}
 	}
-	/**
-	 * Continuously save data every second in a separate thread until paused.
-	 */
-	void saveDataThreaded() {
-		if (isSaving) return;
-		isSaving = true;
 
-		final String mPath = getPath(context);  // Now this gives the correct app-specific directory
-		final String mFileName = getFileName() + ".csv"; // Just use the filename without the full path here
+	public void saveDataThreaded() {
+		if (isSaving) return;
+
+		isSaving = true;
+		final String mFileName = getFileName() + ".csv";
 
 		progress = new ProgressDialog(context);
-		progress.setMessage(context.getString(R.string.saving_data) + ": " + mFileName);
+		progress.setMessage("Saving data to: " + mFileName);
 		progress.setCancelable(false);
 		progress.setButton(DialogInterface.BUTTON_NEGATIVE, "Stop", (dialog, which) -> stopSaving());
-
 		progress.show();
 
-		Runnable saveTask = new Runnable() {
+		handler.post(new Runnable() {
 			@Override
 			public void run() {
 				if (!isPaused && isSaving) {
-					saveData(mFileName); // Pass only the path and filename separately
-					handler.postDelayed(this, 1000); // Schedule next save in 1 second
+					saveData(mFileName);
+					handler.postDelayed(this, 1500);
 				} else {
 					progress.dismiss();
 				}
 			}
-		};
-		handler.post(saveTask);
+		});
 	}
 
-
-	/**
-	 * Method to stop the saving process.
-	 */
 	public void stopSaving() {
-		isSaving = false; // Stop the saving process
-		handler.removeCallbacksAndMessages(null); // Remove all scheduled tasks
+		isSaving = false;
+		handler.removeCallbacksAndMessages(null);
 		if (progress != null && progress.isShowing()) {
-			progress.dismiss(); // Dismiss the progress dialog
+			progress.dismiss();
 		}
 	}
 
+	void saveData(String fileName) {
+		if (!isSaving) {
+			Log.e(TAG, "Data saving is not active.");
+			return;
+		}
+
+		// Directory setup
+		File saveDir = new File(Environment.getExternalStorageDirectory(), "Documents");
+		if (!saveDir.exists() && !saveDir.mkdirs()) {
+			Log.e(TAG, "Failed to create save directory.");
+			Toast.makeText(context, "Error: Cannot create save directory.", Toast.LENGTH_SHORT).show();
+			return;
+		}
+
+		String fullPath = saveDir.getAbsolutePath() + File.separator + fileName;
+
+		try (FileWriter writer = new FileWriter(fullPath, true)) {
+			File file = new File(fullPath);
+			if (file.length() == 0) {
+				// Write headers if file is empty
+				writer.write("Timestamp,Vehicle Speed (km/h),RPM,Fuel Consumption (L/100km),Gear Position,Brake Status,Steering Wheel Angle (degrees)\n");
+			}
+
+			// Fetch data
+			String timestamp = dateFmt.format(System.currentTimeMillis());
+			String speed = getData("010D"); // Vehicle Speed
+			String rpm = getData("010C"); // Engine RPM
+			String engineLoad = getData("0104"); // Engine Load (%)
+			/*String throttlePosition = getData("0111");*/ // Throttle Position (%)
+			String maf = getData("0110"); // MAF (g/s)
+
+			// Derived data
+			String fuelConsumption = calculateFuelConsumption(maf, speed);
+			String gearPosition = calculateGearPosition(speed, rpm);// Use MAF for better accuracy
+			/*String gearPosition = calculateGearPosition(speed, rpm, throttlePosition); */// Refined with throttle position
+			String brakeStatus = calculateBrakeStatus(speed); // Derived from speed
+			String steeringAngle = calculateSteeringAngle(speed, rpm, engineLoad); // Refined with engine load
+
+			// Write data row
+			writer.write(String.format("%s,%s,%s,%s,%s,%s,%s\n",
+					timestamp,
+					speed != null ? speed : "N/A",
+					rpm != null ? rpm : "N/A",
+					fuelConsumption != null ? fuelConsumption : "N/A",
+					gearPosition != null ? gearPosition : "N/A",
+					brakeStatus != null ? brakeStatus : "N/A",
+					steeringAngle != null ? steeringAngle : "N/A"));
+
+			writer.flush();
+			Log.d(TAG, "Data saved successfully to: " + fullPath);
+			Toast.makeText(context, "Data saved to: " + fullPath, Toast.LENGTH_SHORT).show();
+		} catch (IOException e) {
+			Log.e(TAG, "Error saving data", e);
+			Toast.makeText(context, "Error saving data: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+		}
+	}
+
+// Helper methods for derived calculations
+
+	private String calculateFuelConsumption(String maf, String speed) {
+		try {
+			double mafValue = Double.parseDouble(maf); // MAF in g/s
+			double speedValue = Double.parseDouble(speed); // Speed in km/h
+
+			// Convert MAF to fuel consumption (L/100km)
+			// Assuming stoichiometric ratio for gasoline (14.7:1 air to fuel) and gasoline density (720 g/L)
+			double fuelRate = (mafValue / 14.7) / 720.0 * 3600.0; // Fuel rate in L/h
+			double fuelConsumption = fuelRate / Math.max(1, speedValue) * 100.0; // Convert to L/100km
+
+			return String.format("%.2f", fuelConsumption);
+		} catch (NumberFormatException e) {
+			Log.e(TAG, "Error calculating fuel consumption", e);
+			return "Error";
+		}
+	}
+	private String calculateGearPosition(String speed, String rpm) {
+		try {
+			int speedValue = Integer.parseInt(speed);
+			int rpmValue = Integer.parseInt(rpm);
+
+			// Approximate gear ratio calculation (values can vary by car model)
+			double gearRatio = (rpmValue / 1000.0) / Math.max(1, speedValue);
+
+			if (gearRatio < 0.5) return "5"; // Example thresholds for gear ratios
+			else if (gearRatio < 1.0) return "4";
+			else if (gearRatio < 1.5) return "3";
+			else if (gearRatio < 2.0) return "2";
+			else return "1";
+		} catch (NumberFormatException e) {
+			Log.e(TAG, "Error calculating gear position", e);
+			return "Error";
+		}
+	}
+
+
+	/*private String calculateGearPosition(String speed, String rpm, String throttlePosition) {
+		try {
+			double speedValue = Double.parseDouble(speed);
+			double rpmValue = Double.parseDouble(rpm);
+			double throttleValue = Double.parseDouble(throttlePosition);
+
+			// Approximate gear ratio calculation
+			double gearRatio = rpmValue / Math.max(1, speedValue);
+
+			// Adjust thresholds based on throttle position (aggressive driving implies lower gear)
+			if (throttleValue > 70) gearRatio *= 1.2;
+
+			if (gearRatio < 0.5) return "5"; // Example thresholds for gear ratios
+			else if (gearRatio < 1.0) return "4";
+			else if (gearRatio < 1.5) return "3";
+			else if (gearRatio < 2.0) return "2";
+			else return "1";
+		} catch (NumberFormatException e) {
+			Log.e(TAG, "Error calculating gear position", e);
+			return "Error";
+		}
+	}*/
+
+	private String calculateBrakeStatus(String speed) {
+		try {
+			double speedValue = Double.parseDouble(speed);
+
+			// Assumption: brake engaged when speed is close to 0
+			return (speedValue < 1) ? "Engaged" : "Not Engaged";
+		} catch (NumberFormatException e) {
+			Log.e(TAG, "Error calculating brake status", e);
+			return "Error";
+		}
+	}
+
+	private String calculateSteeringAngle(String speed, String rpm, String engineLoad) {
+		try {
+			double speedValue = Double.parseDouble(speed);
+			double rpmValue = Double.parseDouble(rpm);
+			double engineLoadValue = Double.parseDouble(engineLoad);
+
+			// Simulate steering angle using speed, RPM, and engine load
+			double angle = (Math.sin(speedValue / 100.0) + engineLoadValue / 100.0) * (rpmValue / 1000.0);
+			return String.format("%.1f", angle);
+		} catch (NumberFormatException e) {
+			Log.e(TAG, "Error calculating steering angle", e);
+			return "Error";
+		}
+	}
+
+	private String getData(String pid) {
+		try {
+			// Send the command for the PID
+			sendPidRequest(pid);
+
+			// Wait for the response
+			Thread.sleep(500); // Adjust delay as needed for your device
+
+			// Process the response
+			String response = processResponse(pid);
+			return response != null ? response : "Error";
+		} catch (InterruptedException e) {
+			Log.e(TAG, "Interrupted while waiting for PID response: " + pid, e);
+			return "Error";
+		} catch (Exception e) {
+			Log.e(TAG, "Error while getting data for PID: " + pid, e);
+			return "Error";
+		}
+	}
 
 	private void sendPidRequest(String pid) {
 		try {
-			ElmProt.CMD cmdEnum = ElmProt.CMD.valueOf(pid); // Convert the PID string to CMD enum constant
-			String cmd = createCommand(cmdEnum, 0); // Use createCommand to build the full command
-			sendCommandForPid(cmd); // Send the constructed command
-		} catch (IllegalArgumentException e) {
-			log.severe("Invalid PID: " + pid);  // Handle invalid PID if not found in the enum
-			Toast.makeText(context, "Invalid PID: " + pid, Toast.LENGTH_SHORT).show();
+			String command = "01" + pid.substring(2); // Format PID for ELM327
+			elm.sendTelegram(command.toCharArray());
+			Log.d(TAG, "Sent PID request: " + command);
+		} catch (Exception e) {
+			Log.e(TAG, "Failed to send PID request: " + pid, e);
 		}
 	}
-	// Sends the command to the ELM327 (adapt as needed based on your setup)
-	public String sendCommandForPid(String cmd) {
-		// This method assumes that you can send raw commands
-		elm.sendCommand(ElmProt.CMD.valueOf(cmd), 0);  // CMD.valueOf is an example; replace with how you send commands
-		return cmd;
-	}
 
-// Assuming you have CMD enum like this
-// public enum CMD { RESET("Z", 0, true), ... };
+	@SuppressLint("DefaultLocale")
+    private String processResponse(String pid) {
+		String response = lastRxMsg.trim(); // Get the last received message
 
-	private String createCommand(ElmProt.CMD cmdID, int param) {
-		String cmd = null;
-
-		if (cmdID.isEnabled()) {
-			// Get the command from the enum constant directly
-			cmd = "01" + cmdID.command; // Use the command from the enum
-
-			// Check if parameter digits are required
-			if (cmdID.getParamDigits() > 0) {
-				// Format the parameter with leading zeros according to the specified digits
-				String fmtString = "%0" + cmdID.getParamDigits() + "X";
-				cmd += String.format(fmtString, param);
-			}
+		// Ensure that the response is valid
+		if (response == null || response.length() < 5) {
+			Log.e(TAG, "Invalid response received: " + response);
+			return "Error";
 		}
 
-		return cmd; // Return the final command string
-	}
-
-	public void saveData(String fileName) {
-		// Get the app's internal storage "Documents" directory
-		File documentsDir = new File(Environment.getExternalStorageDirectory(), "Documents");
-
-		// Create the directory if it does not exist
-		if (!documentsDir.exists()) {
-			documentsDir.mkdirs();  // Make sure the "Documents" folder exists
-		}
-
-		// Create the full file path in the Documents directory
-		String fullPath = documentsDir.getAbsolutePath() + File.separator + fileName;
-
-
-		// Open CSV file for writing (append mode)
-		try (FileWriter writer = new FileWriter(fullPath, true)) {
-			// Check if the file is empty to write a header row
-			File file = new File(fullPath);
-			if (file.length() == 0) {
-				writer.write("Description,Value,Units,PID\n"); // Header for CSV
-			}
-
-			// Loop through all process variables in `pvs`
-			if (pvs == null) {
-				Log.e("SaveData", "pvs is null. No data to save.");
-				return;
-			}
-
-			for (Object obj : pvs.values()) {
-				// Ensure the object is of the correct type
-				if (obj instanceof IndexedProcessVar) {
-					IndexedProcessVar pv = (IndexedProcessVar) obj;
-
-					// Retrieve fields for each data item
-					String description = String.valueOf(pv.get(EcuDataPv.FID_DESCRIPT));
-					String value = String.valueOf(pv.get(EcuDataPv.FID_VALUE));
-					String units = String.valueOf(pv.get(EcuDataPv.FID_UNITS));
-					String pid = String.valueOf(pv.get(EcuDataPv.FID_PID));
-
-					// Construct CSV row and write it to the file
-					String csvRow = String.format("%s,%s,%s,%s\n", description, value, units, pid);
-					writer.write(csvRow);
-				} else {
-					Log.e("SaveData", "Unexpected object in pvs: " + obj);
+		// Example for Vehicle Speed (PID 010D)
+		if (pid.equals("010D")) {  // Vehicle speed
+			if (response.length() >= 6) {
+				String speedHex = response.substring(4, 6);  // Extract "1A"
+				try {
+					int speed = Integer.parseInt(speedHex, 16);  // Convert to decimal (26 km/h)
+					return String.valueOf(speed);
+				} catch (NumberFormatException e) {
+					Log.e(TAG, "Error parsing speed: " + speedHex, e);
 				}
 			}
-
-			// Flush and close the writer
-			writer.flush();
-			Log.d("SaveData", "Data saved successfully at: " + fullPath);
-			Toast.makeText(context, "Data saved at: " + fullPath, Toast.LENGTH_SHORT).show();
-
-		} catch (IOException e) {
-			Log.e("SaveData", "Error saving data", e);
-			Toast.makeText(context, "File write error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-		} catch (Exception e) {
-			// Catch any unexpected exceptions
-			Log.e("SaveData", "Unexpected error", e);
-			Toast.makeText(context, "Unexpected error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
 		}
+
+		// Example for Engine RPM (PID 010C)
+		if (pid.equals("010C")) {  // RPM
+			if (response.length() >= 6) {
+				String rpmHex = response.substring(4, 8);  // Extract "1234"
+				try {
+					int rpm = Integer.parseInt(rpmHex, 16);  // Convert to decimal
+					return String.valueOf(rpm);
+				} catch (NumberFormatException e) {
+					Log.e(TAG, "Error parsing RPM: " + rpmHex, e);
+				}
+			}
+		}
+
+		/*if (pid.equals("0111")) {  // Throttle Position
+			if (response.length() >= 6) {
+				String throttleHex = response.substring(4, 6);  // Extract byte
+				try {
+					int throttle = Integer.parseInt(throttleHex, 16) * 100 / 255;  // Scale to percentage
+					return String.format("%d%%", throttle);  // Return throttle position
+				} catch (NumberFormatException e) {
+					Log.e(TAG, "Error parsing Throttle Position: " + throttleHex, e);
+				}
+			}
+		}*/
+
+		if (pid.equals("0110")) {  // MAF (Mass Air Flow)
+			if (response.length() >= 8) {  // Ensure we have enough bytes
+				String mafHex = response.substring(4, 8);  // Extract "AABB"
+				try {
+					int maf = Integer.parseInt(mafHex.substring(0, 2), 16) * 256
+							+ Integer.parseInt(mafHex.substring(2, 4), 16);  // Combine A and B
+					double mafValue = maf / 100.0;  // Scale to g/s
+					return String.format("%.2f", mafValue);  // Return MAF in g/s
+				} catch (NumberFormatException e) {
+					Log.e(TAG, "Error parsing MAF: " + mafHex, e);
+				}
+			}
+		}
+
+		if (pid.equals("0104")) {  // Engine Load
+			if (response.length() >= 6) {  // Ensure we have enough bytes
+				String loadHex = response.substring(4, 6);  // Extract "A"
+				try {
+					int loadValue = Integer.parseInt(loadHex, 16);  // Convert "A" from hex to decimal
+					double engineLoad = (loadValue * 100.0) / 255.0;  // Scale to percentage
+					return String.format("%.2f", engineLoad);  // Return Engine Load as a percentage
+				} catch (NumberFormatException e) {
+					Log.e(TAG, "Error parsing Engine Load: " + loadHex, e);
+				}
+			}
+		}
+
+
+
+		// Add more PIDs as needed (Fuel, Gear Position, Brake Status, Steering Angle, etc.)
+
+		Log.e(TAG, "Unsupported PID or invalid response: " + pid);
+		return "Error";  // Return error if the PID is unsupported or the response is invalid
 	}
 
 
 
-
-
-
-	// Helper method to fetch data for a given PID
-	private String getData(String pid) {
-		// Send the command for the PID and return the response
-		sendPidRequest(pid);
-
-		// You will need to implement response processing here
-		return processResponse(pid);  // processResponse needs to handle the response parsing
-	}
-
-	private String processResponse(String pid) {
-		// Parse the response and return the data as needed
-		return "parsed_data";  // Placeholder for actual response handling
-	}
 
 
 
@@ -351,5 +460,9 @@ public class FileHelper
 			log.log(Level.SEVERE, uri.toString(), ex);
 		}
 		return numBytesLoaded;
+	}
+	// Getter for the PvList
+	public PvList getPvs() {
+		return (PvList) this.pvs;
 	}
 }

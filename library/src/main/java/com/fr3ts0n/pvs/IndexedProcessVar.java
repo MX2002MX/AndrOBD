@@ -85,4 +85,5 @@ public abstract class IndexedProcessVar extends ProcessVar
 	{
 		return (remove(getFields()[fieldID]));
 	}
+
 }
